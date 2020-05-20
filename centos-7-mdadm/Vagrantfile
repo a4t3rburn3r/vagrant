@@ -1,0 +1,163 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Check where we are now Win/Lin
+if (/cygwin|mswin|mingw|bccwin|wince|emx/ =~ RUBY_PLATFORM) != nil
+  # So we are on Windows
+  vboxmanage_path = "C:\\Program Files\\Oracle\\VirtualBox\\VBoxManage.exe"
+else
+  # So we are on Mac/Lin
+  vboxmanage_path = "VBoxManage"
+end
+
+Vagrant.configure("2") do |config|
+  config.vm.define "centos-7" do |vm1|
+    # Box to use
+    vm1.vm.box = "bento/centos-7"
+
+    # Name of the vagrant instance
+    vm1.vm.define "centos-7"
+
+    # Hostname inside vm
+    vm1.vm.hostname = "centos-7"
+
+    # Define network and shared folders
+    # vm1.vm.network "private_network", ip: "10.0.51.103"
+    # vm1.vm.network "forwarded_port", guest: 80, host: 8080, host_ip: "127.0.0.1"
+    # vm1.vm.synced_folder "./html", "/var/www/html"
+
+    vm1.vm.provider "virtualbox" do |vb|
+      # Set virtual box vm name
+      vb.name = "centos-7"
+
+      # Open GUI when up
+      vb.gui = false
+
+      # Set vm memory
+      vb.memory = "1024"
+
+      # Add new disks
+      # Get vm path
+      machine_folder_line = `"#{vboxmanage_path}" list systemproperties`.split(/\n/).grep(/Default machine folder/).first
+      vb_folder = machine_folder_line.split(':', 2)[1].strip()
+	  # Add disk for OS raid1 migration
+	  new_disk = File.join(vb_folder, vb.name, "disk-1.vdi")
+        unless File.exist?(new_disk)
+          # Create 64GB disk
+          vb.customize ['createmedium', '--filename', new_disk, '--size', 65536]
+        end
+        # Attach disk to vm
+        vb.customize ['storageattach', :id, '--storagectl', 'SATA Controller', '--port', 1, '--device', 0, '--type', 'hdd', '--medium', new_disk]
+	  # Add disks for raid 10
+      # Set disk count
+      new_drives = [2,3,4,5]
+      new_drives.each do |hdd_num|
+        new_disk = File.join(vb_folder, vb.name, "disk-#{hdd_num}.vdi")
+        unless File.exist?(new_disk)
+          # Create 1GB disk
+          vb.customize ['createmedium', '--filename', new_disk, '--size', 1000]
+        end
+        # Attach disk to vm
+        vb.customize ['storageattach', :id, '--storagectl', 'SATA Controller', '--port', "#{hdd_num}", '--device', 0, '--type', 'hdd', '--medium', new_disk]
+      end
+    end
+
+    # Execute some shell code once
+    vm1.vm.provision "shell", inline: <<-SHELL
+#      yum update --exclude=kernel* -y
+#      yum update -y
+      yum install mdadm parted -y
+      # Moving OS drive to mdadm RAID 1
+      # cloning partition table from OS drive sda to new drive sdb
+      sfdisk -d /dev/sda > /tmp/sda_part_table
+      sfdisk /dev/sdb < /tmp/sda_part_table
+      # creting first raid 1 for /boot
+      mdadm --create /dev/md0 --level=1 --raid-disks=2 missing /dev/sdb1 --metadata=1.0
+      mkfs.xfs /dev/md0
+      mkdir /mnt/md0
+      mount /dev/md0 /mnt/md0
+      # moving data and replacing partition
+      rsync -a /boot/ /mnt/md0/
+      sync
+      umount /mnt/md0
+      umount /boot/
+      mount /dev/md0 /boot
+      rmdir /mnt/md0
+      mdadm /dev/md0 -a /dev/sda1
+      # correcting fstab to change old /boot uuid to new md0 uuid
+      cp /etc/fstab /etc/fstab_bak
+      sed -i "/\\\/boot/s/^/#/" /etc/fstab
+      md0_uuid=$(blkid | grep /dev/md0 | grep -oP 'UUID="\\\K[^"]+')
+      echo "UUID=$md0_uuid /boot xfs defaults 0 0" >> /etc/fstab
+      # Two upper commnads can be replaced with one this
+      # lsblk -f | grep md0 | sort -u | awk '{print "UUID="$4" /boot xfs deafults 0 0"}' >> /etc/fstab
+      sleep 5
+      # creating second degarded raid 1 for lvm data
+      # extending volume group to new raid
+      # moving phisical volume to new raid
+      # dropping and removing old partition from volume group and phisical volume
+      mdadm --create /dev/md1 --level=1 --raid-disks=2 missing /dev/sdb2 --metadata=1.0
+      vgextend centos /dev/md1
+      pvmove /dev/sda2 /dev/md1
+      vgreduce centos /dev/sda2
+      pvremove /dev/sda2
+      cp /etc/lvm/lvm.conf /etc/lvm/lvm.conf_bak
+      sed -i "s/use_lvmetad = 1/use_lvmetad = 0/g" /etc/lvm/lvm.conf
+      systemctl stop lvm2-lvmetad
+      systemctl disable lvm2-lvmetad
+      mdadm /dev/md1 -a /dev/sda2
+      # put raid data to /etc/mdadm.conf to prevent renaming
+      mdadm --examine --scan > /etc/mdadm.conf
+      # correct /boot/default/grub with raid uuid to have actual data for grub reinstalling
+      md0_mdadm_uuid="rd.md.uuid=$(mdadm -D /dev/md0 | grep -oP 'UUID : \\\K[a-zA-Z0-9:]+')"
+      md1_mdadm_uuid="rd.md.uuid=$(mdadm -D /dev/md1 | grep -oP 'UUID : \\\K[a-zA-Z0-9:]+')"
+      cp /etc/default/grub /etc/default/grub_bak
+      sed -i "s/GRUB_CMDLINE_LINUX=\\\"/GRUB_CMDLINE_LINUX=\\\"$md0_mdadm_uuid $md1_mdadm_uuid /g" /etc/default/grub
+      # updating current grub config
+      grub2-mkconfig -o /boot/grub2/grub.cfg
+      echo "(hd1)      /dev/sdb" >> /boot/grub2/device.map
+      # reinstalling grub on both disks
+      grub2-install /dev/sda
+      grub2-install /dev/sdb
+      # rebuilding initramfs with support of mdadm module
+      cp /boot/initramfs-$(uname -r).img /boot/initramfs-$(uname -r).img_bak
+      dracut -f --mdadmconf
+      # rebuilding resque mode for current kernel coz it don't knows about disk changes
+      # don't need to do for new kernels
+      rm -f /boot/initramfs-0-rescue-*
+      rm -f /boot/vmlinuz-0-rescue-*
+      /etc/kernel/postinst.d/51-dracut-rescue-postinst.sh  $(uname -r) /boot/vmlinuz-$(uname -r)
+      grub2-mkconfig -o /boot/grub2/grub.cfg
+      grub2-install /dev/sda
+      grub2-install /dev/sdb
+      sleep 30
+
+      # Creating data array RAID 10
+      mdadm --create /dev/md2 --level=10 --raid-devices=4 /dev/sd{c,d,e,f}
+      mdadm --detail --scan /dev/md2 >> /etc/mdadm.conf
+      parted -s /dev/md2 mklabel gpt mkpart primary 1 20% mkpart primary 20% 40% mkpart primary 40% 60% mkpart primary 60% 80% mkpart primary 80% 100%
+      sleep 5
+      mkfs.xfs /dev/md2p1
+      mkfs.xfs /dev/md2p2
+      mkfs.xfs /dev/md2p3
+      mkfs.xfs /dev/md2p4
+      mkfs.xfs /dev/md2p5
+      echo "/dev/md2p1 /mnt/r10p1 xfs defaults 0 0" >> /etc/fstab
+      echo "/dev/md2p2 /mnt/r10p2 xfs defaults 0 0" >> /etc/fstab
+      echo "/dev/md2p3 /mnt/r10p3 xfs defaults 0 0" >> /etc/fstab
+      echo "/dev/md2p4 /mnt/r10p4 xfs defaults 0 0" >> /etc/fstab
+      echo "/dev/md2p5 /mnt/r10p5 xfs defaults 0 0" >> /etc/fstab
+      mkdir /mnt/r10p{1,2,3,4,5}
+      mount -a
+      chown -R vagrant:vagrant /mnt/*
+    SHELL
+
+    # Execute some shell code every start
+    vm1.vm.provision "shell", run: "always", inline: <<-SHELL
+      echo ""
+      echo "-= Vagrant provisioned centos server with mdadm raid 1 for OS drive and raid 10 from 4 disks and 5 partitions for data =-"
+      echo "-= Check using lsblk, cat /proc/mdstat, df -h, ls -l /mnt, cat /etc/fstab =-"
+      echo ""
+    SHELL
+  end
+end
