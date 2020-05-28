@@ -1,0 +1,107 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.define "ns-server" do |vm1|
+    vm1.vm.box = "bento/centos-7"
+    vm1.vm.define "ns-server"
+    vm1.vm.hostname = "ns-server.test.lab"
+    vm1.vm.network "private_network", ip: "10.0.51.100"
+#    vm1.vm.network "forwarded_port", guest: 80, host: 8081, host_ip: "127.0.0.1"
+#    vm1.vm.synced_folder "./centos_html", "/var/www/html"
+
+    vm1.vm.provider "virtualbox" do |vb|
+      vb.name = "ns-server"
+      vb.gui = false
+      vb.memory = "1024"
+    end
+
+    vm1.vm.provision "shell", inline: <<-SHELL
+      yum update -y
+      yum install bind-utils -y
+    SHELL
+
+    vm1.vm.provision "shell", path: "scripts/ns-server.sh"
+
+    vm1.vm.provision "shell", run: "always", inline: <<-SHELL
+      # moving eth1 back to dmz zone, coz vagrant kicks it from dmz to public after reload
+      firewall-cmd --permanent --zone=dmz --change-interface=eth1
+      # changing dns server
+      sed -i "/nameserver/s/^/#/" /etc/resolv.conf
+	  sed -i "/search/s/^/#/" /etc/resolv.conf
+      echo "nameserver 10.0.51.100" >> /etc/resolv.conf
+      echo "domain test.lab" >> /etc/resolv.conf
+      echo "search test.lab" >> /etc/resolv.conf
+      echo "-= Vagrant provisioned ns-server ready =-"
+    SHELL
+  end
+
+  config.vm.define "nfs-server" do |vm2|
+    vm2.vm.box = "bento/centos-7"
+    vm2.vm.define "nfs-server"
+    vm2.vm.hostname = "nfs-server.test.lab"
+    vm2.vm.network "private_network", ip: "10.0.51.101"
+#    vm2.vm.network "forwarded_port", guest: 80, host: 8080, host_ip: "127.0.0.1"
+#    vm2.vm.synced_folder "./ubuntu_html", "/var/www/html"
+
+    vm2.vm.provider "virtualbox" do |vb|
+      vb.name = "nfs-server"
+      vb.gui = false
+      vb.memory = "1024"
+    end
+
+    vm2.vm.provision "shell", inline: <<-SHELL
+      yum update -y
+      yum install bind-utils -y
+    SHELL
+
+    vm2.vm.provision "shell", path: "scripts/nfs-server.sh"
+
+    vm2.vm.provision "shell", run: "always", inline: <<-SHELL
+      # moving eth1 back to dmz zone, coz vagrant kicks it from dmz to public after reload
+      firewall-cmd --permanent --zone=dmz --change-interface=eth1
+      # changing dns server
+      sed -i "/nameserver/s/^/#/" /etc/resolv.conf
+	  sed -i "/search/s/^/#/" /etc/resolv.conf
+      echo "nameserver 10.0.51.100" >> /etc/resolv.conf
+      echo "domain test.lab" >> /etc/resolv.conf
+      echo "search test.lab" >> /etc/resolv.conf
+      echo "-= Vagrant provisioned nfs-server ready=-"
+    SHELL
+  end
+
+  config.vm.define "nfs-client" do |vm3|
+    vm3.vm.box = "bento/centos-7"
+    vm3.vm.define "nfs-client.test.lab"
+    vm3.vm.hostname = "nfs-client"
+    vm3.vm.network "private_network", ip: "10.0.51.102"
+#    vm3.vm.network "forwarded_port", guest: 80, host: 8081, host_ip: "127.0.0.1"
+#    vm3.vm.synced_folder "./centos_html", "/var/www/html"
+
+    vm3.vm.provider "virtualbox" do |vb|
+      vb.name = "nfs-client"
+      vb.gui = false
+      vb.memory = "1024"
+    end
+
+    vm3.vm.provision "shell", inline: <<-SHELL
+      yum install bind-utils -y
+      yum update -y
+    SHELL
+
+    vm3.vm.provision "shell", path: "scripts/nfs-client.sh"
+
+    vm3.vm.provision "shell", run: "always", inline: <<-SHELL
+      # moving eth1 back to dmz zone, coz vagrant kicks it from dmz to public after reload
+      firewall-cmd --permanent --zone=dmz --change-interface=eth1
+      # changing dns server
+      sed -i "/nameserver/s/^/#/" /etc/resolv.conf
+	  sed -i "/search/s/^/#/" /etc/resolv.conf
+      echo "nameserver 10.0.51.100" >> /etc/resolv.conf
+      echo "domain test.lab" >> /etc/resolv.conf
+      echo "search test.lab" >> /etc/resolv.conf
+      mount -a
+      echo "-= Vagrant provisioned nfs-client ready=-"
+    SHELL
+  end
+end
