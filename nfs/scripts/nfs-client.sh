@@ -58,7 +58,7 @@ yum install nfs-utils -y
 
 # creating directory structure and mounting resources
 mkdir -p /mnt/nfs/pub
-echo "nfs-server.test.lab:/mnt/nfs/pub /mnt/nfs/pub nfs ro,hard,sync,intr,nosuid,noexec,noac,nfsvers=3,proto=tcp,sec=krb5p 0 0" >> /etc/fstab
+echo "nfs-server.test.lab:/mnt/nfs/pub /mnt/nfs/pub nfs ro,hard,sync,intr,nosuid,noexec,noac,nfsvers=3,proto=udp,sec=sys 0 0" >> /etc/fstab
 echo "nfs-server.test.lab:/mnt/nfs/pub/uploads /mnt/nfs/pub/uploads nfs rw,hard,sync,intr,nosuid,noexec,noac,nfsvers=3,proto=tcp,sec=krb5p 0 0" >> /etc/fstab
 systemctl restart nfs
 mount -a

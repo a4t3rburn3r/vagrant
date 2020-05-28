@@ -79,8 +79,8 @@ chown -R nfsnobody:nfsnobody /mnt/nfs/pub
 chmod 0555 /mnt/nfs/pub
 chmod 0777 /mnt/nfs/pub/uploads
 # setting priority fsid to 1 for uploads gives rw access, coz parent ro export directory settings overwrites child rw
-echo "/mnt/nfs/pub nfs-client.test.lab(ro,sync,root_squash,no_subtree_check,sec=krb5p,fsid=2)" >> /etc/exports
-echo "/mnt/nfs/pub/uploads nfs-client.test.lab(rw,sync,root_squash,no_subtree_check,sec=krb5p,fsid=1)" >> /etc/exports
+echo "/mnt/nfs/pub nfs-client.test.lab(ro,sync,all_squash,no_subtree_check,sec=sys:krb5p,fsid=2)" >> /etc/exports
+echo "/mnt/nfs/pub/uploads nfs-client.test.lab(rw,sync,root_squash,no_subtree_check,sec=sys:krb5p,fsid=1)" >> /etc/exports
 exportfs -avr
 systemctl restart nfs-server rpcbind
 
