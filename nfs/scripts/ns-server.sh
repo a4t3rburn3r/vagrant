@@ -107,7 +107,7 @@ awk '{ print "ank -randkey", $1 }' < /tmp/rand_principals | time /usr/sbin/kadmi
 # coz service can not type password by yourself =)
 awk '{ print "ktadd", $1 }' < /tmp/keytab_principals | time /usr/sbin/kadmin.local > /dev/null
 
-rm -f rm /tmp/*principals
+rm -f /tmp/*principals
 
 authconfig --enablekrb5 --update
 
